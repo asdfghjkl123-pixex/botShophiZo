@@ -247,7 +247,7 @@ bot = ShopBot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready() -> None:
     state = load_state()
-    channel_id = os.getenv("HOME_CHANNEL_ID")
+    channel_id = os.getenv("1462389723891761255")
     if not channel_id:
         print("HOME_CHANNEL_ID chưa được cấu hình.")
         return
@@ -284,7 +284,7 @@ async def tao_trang_chu(interaction: discord.Interaction) -> None:
 
 
 def main() -> None:
-    token = os.getenv("DISCORD_TOKEN")
+    token = os.getenv("MTQxNjYwNjU3MDU3MzIwNTUwNA.GY1mco.nO9leU14RX9uxW0flYok2fVcOo8OD_sWm4pUw8")
     if not token:
         raise RuntimeError("DISCORD_TOKEN chưa được cấu hình.")
     bot.run(token)

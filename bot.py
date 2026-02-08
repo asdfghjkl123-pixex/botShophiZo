@@ -254,7 +254,7 @@ bot = ShopBot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready() -> None:
     state = load_state()
-    channel_id = os.getenv("1462389723891761255")
+    channel_id = os.getenv("HOME_CHANNEL_ID")
     if not channel_id:
         print("HOME_CHANNEL_ID chưa được cấu hình.")
         return

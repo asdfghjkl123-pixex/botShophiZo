@@ -284,7 +284,7 @@ async def tao_trang_chu(interaction: discord.Interaction) -> None:
 
 
 def main() -> None:
-    token = os.getenv("MTQxNjYwNjU3MDU3MzIwNTUwNA.GY1mco.nO9leU14RX9uxW0flYok2fVcOo8OD_sWm4pUw8")
+    token = os.getenv("DISCORD_TOKEN")
     if not token:
         raise RuntimeError("DISCORD_TOKEN chưa được cấu hình.")
     bot.run(token)

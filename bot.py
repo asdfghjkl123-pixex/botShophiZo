@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+print("TOKEN =", os.getenv("DISCORD_TOKEN"))
 
 from dataclasses import dataclass
 from pathlib import Path

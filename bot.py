@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 STATE_PATH = Path("data/state.json")
+LOG_PATH = Path("data/orders.log")
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,25 @@ def save_state(state: dict) -> None:
         json.dump(state, handle, ensure_ascii=False, indent=2)
 
 
-def add_history_entry(user_id: int, category: str, product: Product) -> None:
+def write_order_log(entry: str) -> None:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(entry + "\n")
+
+
+def ensure_order_counter(state: dict) -> None:
+    if "order_counter" not in state:
+        state["order_counter"] = 1
+
+
+def get_next_order_id(state: dict) -> int:
+    ensure_order_counter(state)
+    order_id = state["order_counter"]
+    state["order_counter"] = order_id + 1
+    return order_id
+
+
+def add_history_entry(user_id: int, category: str, product: Product, status: str) -> None:
     state = load_state()
     history = state.setdefault("history", {})
     user_history = history.setdefault(str(user_id), [])
@@ -62,11 +81,34 @@ def add_history_entry(user_id: int, category: str, product: Product) -> None:
             "category": category,
             "label": product.label,
             "price": product.price,
+            "status": status,
             "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         },
     )
     history[str(user_id)] = user_history[:20]
     save_state(state)
+
+def add_order_entry(user_id: int, category: str, product: Product) -> dict:
+    state = load_state()
+    order_id = get_next_order_id(state)
+    order = {
+        "order_id": order_id,
+        "user_id": user_id,
+        "category": category,
+        "label": product.label,
+        "price": product.price,
+        "status": "Chờ xử lý",
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    orders = state.setdefault("orders", [])
+    orders.insert(0, order)
+    state["orders"] = orders[:200]
+    save_state(state)
+    write_order_log(
+        f"[{order['timestamp']}] order_id={order_id} user_id={user_id} "
+        f"category={category} label={product.label} price={product.price} status=Chờ xử lý"
+    )
+    return order
 
 
 def build_history_embed(user_id: int) -> discord.Embed:
@@ -88,7 +130,12 @@ def build_history_embed(user_id: int) -> discord.Embed:
     for item in entries[:10]:
         embed.add_field(
             name=f"🧾 {item['label']}",
-            value=f"**Danh mục:** {item['category']}\n**Giá:** {item['price']}\n**Thời gian:** {item['timestamp']}",
+            value=(
+                f"**Danh mục:** {item['category']}\n"
+                f"**Giá:** {item['price']}\n"
+                f"**Trạng thái:** {item.get('status', 'Chờ xử lý')}\n"
+                f"**Thời gian:** {item['timestamp']}"
+            ),
             inline=False,
         )
     return embed
@@ -99,7 +146,9 @@ def build_home_embed() -> discord.Embed:
         title="🏠 Trang chủ",
         description=(
             "Chào mừng bạn đến với shop!\n"
-            "Chọn mục bên dưới để xem dịch vụ, quản trị, hoặc lịch sử mua hàng."
+            "Chọn mục bên dưới để xem dịch vụ, quản trị, hoặc lịch sử mua hàng.\n\n"
+            "⚠️ **Rủi ro:** Dịch vụ phụ thuộc vào tình trạng game/ server. "
+            "Shop không chịu trách nhiệm khi có sự cố ngoài ý muốn."
         ),
         color=discord.Color.from_rgb(88, 101, 242),
     )
@@ -156,9 +205,15 @@ class ProductSelect(discord.ui.Select):
                 "Sản phẩm không tồn tại.", ephemeral=True
             )
             return
-        add_history_entry(interaction.user.id, self.category, product)
+        order = add_order_entry(interaction.user.id, self.category, product)
+        add_history_entry(
+            interaction.user.id, self.category, product, order["status"]
+        )
         embed = build_product_detail_embed(self.category, product)
+        embed.add_field(name="Mã đơn", value=str(order["order_id"]), inline=True)
+        embed.add_field(name="Trạng thái", value=order["status"], inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_order_log(interaction, order)
 
 
 class ProductSelectView(discord.ui.View):
@@ -255,6 +310,25 @@ async def send_category(interaction: discord.Interaction, category: str) -> None
     view = ProductSelectView(category)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+async def send_order_log(interaction: discord.Interaction, order: dict) -> None:
+    log_channel_id = os.getenv("LOG_CHANNEL_ID")
+    if not log_channel_id:
+        return
+    channel = interaction.client.get_channel(int(log_channel_id))
+    if channel is None:
+        return
+    embed = discord.Embed(
+        title="🧾 Log đơn hàng mới",
+        color=discord.Color.teal(),
+    )
+    embed.add_field(name="Mã đơn", value=str(order["order_id"]), inline=True)
+    embed.add_field(name="Trạng thái", value=order["status"], inline=True)
+    embed.add_field(name="Danh mục", value=order["category"], inline=True)
+    embed.add_field(name="Dịch vụ", value=order["label"], inline=True)
+    embed.add_field(name="Giá", value=order["price"], inline=True)
+    embed.add_field(name="User ID", value=str(order["user_id"]), inline=True)
+    embed.set_footer(text=order["timestamp"])
+    await channel.send(embed=embed)
 
 class ShopBot(commands.Bot):
     async def setup_hook(self) -> None:
@@ -307,6 +381,30 @@ async def tao_trang_chu(interaction: discord.Interaction) -> None:
     view = HomeView()
     await interaction.response.send_message(embed=embed, view=view)
 
+
+@bot.tree.command(name="cap-nhat-don", description="Cập nhật trạng thái đơn hàng")
+@app_commands.checks.has_permissions(administrator=True)
+async def cap_nhat_don(
+    interaction: discord.Interaction, order_id: int, status: str
+) -> None:
+    state = load_state()
+    orders = state.get("orders", [])
+    target = next((item for item in orders if item["order_id"] == order_id), None)
+    if not target:
+        await interaction.response.send_message(
+            "Không tìm thấy đơn hàng.", ephemeral=True
+        )
+        return
+    target["status"] = status
+    save_state(state)
+    write_order_log(
+        f"[{datetime.utcnow().isoformat(timespec='seconds')}Z] "
+        f"order_id={order_id} status_updated={status} by_admin={interaction.user.id}"
+    )
+    await interaction.response.send_message(
+        f"Đã cập nhật trạng thái đơn {order_id} thành **{status}**.",
+        ephemeral=True,
+    )
 
 def main() -> None:
     token = os.getenv("DISCORD_TOKEN")
